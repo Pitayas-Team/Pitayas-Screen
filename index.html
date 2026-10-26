@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Pitayas Screen</title>
+  <link rel="stylesheet" href="core/ui/pitaya-theme.css">
+  <style>
+    .dev { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--m-field); border: 1px solid var(--m-line); border-radius: 14px; }
+    .dev .ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--m-item); font-size: 20px; }
+    .dev .t { flex: 1; min-width: 0; } .dev b { display: block; font-size: 13.5px; color: var(--m-text); } .dev small { font-size: 12px; color: var(--m-text-3); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--m-text-3); } .dot.on { background: #7ddc5a; box-shadow: 0 0 8px #7ddc5a; } .dot.warn { background: #ffb547; }
+    .list { display: flex; flex-direction: column; gap: 8px; }
+    .stat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat div { background: var(--m-field); border: 1px solid var(--m-line); border-radius: 14px; padding: 10px; text-align: center; }
+    .stat b { display: block; font-size: 18px; color: var(--m-text); } .stat small { font-size: 11px; color: var(--m-text-3); text-transform: uppercase; letter-spacing: .06em; }
+    .help { font-size: 12.5px; line-height: 1.55; color: var(--m-text-3); } .help b { color: var(--m-text-2); }
+    .err { color: #ff6b7f; font-size: 12.5px; }
+    .data-row { display: flex; align-items: center; gap: 10px; } .data-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--m-text-2); background: var(--m-surface); padding: 6px 10px; border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></symbol>
+  </svg>
+  <div class="m-titlebar">
+    <div class="m-titlebar-brand"><img src="icon.png" alt=""><span class="m-titlebar-name">Pitayas Screen</span></div>
+    <div class="m-titlebar-actions">
+      <div class="m-update-pill" id="updatePill" title="Dostępna aktualizacja"><svg class="ico"><use href="#i-download"/></svg>Aktualizacja</div>
+      <button class="m-win-btn" id="btnSettings" onclick="PitayaUI.openModal('modalSettings')" title="Ustawienia"><svg class="ico"><use href="#i-gear"/></svg><span class="m-dot"></span></button>
+      <div class="m-win-sep"></div>
+      <button class="m-win-btn" data-win="min" title="Minimalizuj"><svg viewBox="0 0 12 12"><path d="M1 6.5h10"/></svg></button>
+      <button class="m-win-btn close" data-win="close" title="Schowaj do zasobnika"><svg viewBox="0 0 12 12"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></button>
+    </div>
+  </div>
+
+  <div class="m-content"><div class="m-container">
+    <div class="m-hero"><div class="m-hero-brand">
+      <div class="m-logo-box"><img src="icon.png" alt=""></div>
+      <div><div class="m-hero-kicker">Pitayas</div><div class="m-hero-title">Pitayas <span>Screen</span></div></div>
+    </div><div class="m-hero-tagline">Telefon jako dodatkowy monitor — przez kabel USB</div></div>
+
+    <div class="m-panel">
+      <div class="m-panel-header"><span class="m-panel-title">Obraz</span><span class="m-chip muted" id="via">brak telefonu</span></div>
+      <div class="m-panel-body">
+        <div class="stat"><div><b id="sSize">—</b><small>Rozdzielczość</small></div><div><b id="sFps">—</b><small>Kl/s</small></div><div><b id="sMbps">—</b><small>Mb/s</small></div></div>
+        <div class="err" id="err"></div>
+      </div>
+    </div>
+
+    <div class="m-panel">
+      <div class="m-panel-header"><span class="m-panel-title">Telefony na kablu</span></div>
+      <div class="m-panel-body">
+        <div class="list" id="devices"></div>
+        <div class="help">
+          <b>iPhone:</b> podłącz kablem, zaufaj temu komputerowi, otwórz w aplikacji Pitayas moduł <b>Screen</b>.<br>
+          <b>Android:</b> włącz <b>Opcje programisty → Debugowanie USB</b>, podłącz kablem i zezwól na debugowanie, otwórz moduł <b>Screen</b>.<br>
+          Przy pierwszym połączeniu system zapyta o udostępnienie ekranu — zgoda zostaje zapamiętana.
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div class="m-modal-overlay" id="modalSettings"><div class="m-modal">
+    <div class="m-modal-header"><span class="m-modal-title">Ustawienia</span><button class="m-modal-close" onclick="PitayaUI.closeModal('modalSettings')">✕</button></div>
+    <div class="m-modal-body">
+      <div class="m-about"><img src="icon.png" alt=""><div><div class="m-about-name">Pitayas Screen</div><div class="m-about-desc">Telefon jako monitor</div><div class="m-small">Wersja: <span id="appVersionText">—</span></div></div></div>
+      <div class="m-update-card">
+        <div class="m-update-head"><div><div class="m-update-title">Aktualizacje z GitHub</div><div class="m-update-status" id="updateStatusText">Sprawdź, czy jest nowsza wersja</div></div><button class="m-btn small" id="btnCheckUpdate">Sprawdź</button></div>
+        <div class="m-update-details" id="updateDetails"><div id="updateInfo"></div><div style="display:flex; gap:8px;"><button class="m-btn small success" id="btnApplyUpdate">Zainstaluj aktualizację</button><button class="m-btn small accent" id="btnRestartApp" style="display:none;">Uruchom ponownie</button></div></div>
+      </div>
+      <div class="m-field"><label class="m-label" for="enc">Koder wideo</label><select id="enc" class="m-select"></select></div>
+      <div class="m-field"><span class="m-label">Zgoda systemu na ekran</span><div class="data-row"><code>zapamiętana — bez pytania przy każdym połączeniu</code><button class="m-btn small" id="btnForget">Zapomnij</button></div></div>
+      <div class="m-field"><span class="m-label">Folder danych (Pitaya Core)</span><div class="data-row"><code id="dataDirText">—</code><button class="m-btn small" id="btnOpenDataDir">Otwórz</button></div></div>
+      <div class="m-small">Repozytorium: <a class="m-link" id="repoLink" href="#">github.com/Pitayas-Team/Pitayas-Screen</a></div>
+    </div>
+    <div class="m-modal-footer"><button class="m-btn small danger" onclick="window.api.quit()">Zamknij aplikację</button><button class="m-btn small accent" onclick="PitayaUI.closeModal('modalSettings')">Zamknij</button></div>
+  </div></div>
+
+  <script src="core/ui/pitaya-ui.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => PitayaUI.escapeHTML(s);
+    function render(s) {
+      const st = s.stream || {};
+      $('via').textContent = st.via || 'brak telefonu';
+      $('sSize').textContent = st.size || '—';
+      $('sFps').textContent = st.streaming ? st.fps || 0 : '—';
+      $('sMbps').textContent = st.streaming ? st.mbps || 0 : '—';
+      $('err').textContent = st.error || s.cable.error || (s.encoders.length ? '' : 'Brak kodera H.264 w GStreamerze (zainstaluj gstreamer1-plugins-bad / openh264).');
+      const rows = [
+        ...s.cable.iphone.map((d) => ({ ic: '', name: 'iPhone', sub: d.state === 'ok' ? 'Połączony' : 'Czeka na moduł Screen w aplikacji', on: d.state === 'ok' })),
+        ...s.cable.android.map((d) => ({ ic: '🤖', name: `Android ${d.serial}`, sub: d.state === 'ok' ? 'Tunel USB gotowy' : d.state === 'unauthorized' ? 'Zezwól na debugowanie na telefonie' : d.state, on: d.state === 'ok', warn: d.state !== 'ok' })),
+      ];
+      $('devices').innerHTML = rows.length ? rows.map((r) => `<div class="dev"><span class="ic">${r.ic}</span><span class="t"><b>${esc(r.name)}</b><small>${esc(r.sub)}</small></span><span class="dot ${r.on ? 'on' : r.warn ? 'warn' : ''}"></span></div>`).join('')
+        : `<div class="dev"><span class="ic">🔌</span><span class="t"><b>Podłącz telefon kablem</b><small>${s.cable.adb ? 'iPhone albo Android z debugowaniem USB' : 'Brak programu adb — Android nie zadziała (iPhone tak)'}</small></span></div>`;
+      $('enc').innerHTML = `<option value="auto">Automatycznie${s.encoders[0] ? ` — ${esc(s.encoders[0].label)}` : ''}</option>` + s.encoders.map((e) => `<option value="${e.id}" ${s.encoder === e.id ? 'selected' : ''}>${esc(e.label)}</option>`).join('');
+    }
+    $('enc').onchange = () => window.api.setEncoder($('enc').value);
+    $('btnForget').onclick = async () => { await window.api.forget(); PitayaUI.showToast('Przy następnym połączeniu system zapyta ponownie', 'info'); };
+    window.api.onState(render);
+    window.api.state().then(render);
+  </script>
+</body>
+</html>
