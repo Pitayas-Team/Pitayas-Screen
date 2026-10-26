@@ -3,12 +3,13 @@
 // Tutaj dzielimy strumień na klatki i zamieniamy na format dla WebCodecs w telefonie (avcC + długości NAL).
 const { spawn, execFileSync } = require('child_process');
 
+// Klatka kluczowa co 30 klatek = co sekundę (stałe 30 kl/s z videorate — pusty pulpit też daje klatki, więc obraz pojawia się od razu)
 // Kolejność: NVIDIA, VA-API (Intel/AMD), x264, OpenH264. Pierwszy, który działa na tym komputerze, wygrywa.
 const ENCODERS = [
-    { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps) => `nvh264enc bitrate=${kbps} gop-size=60 bframes=0 zerolatency=true rc-mode=cbr` },
-    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps) => `vah264enc bitrate=${kbps} key-int-max=60 b-frames=0 rate-control=cbr target-usage=7` },
-    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps) => `x264enc tune=zerolatency speed-preset=ultrafast bitrate=${kbps} key-int-max=60` },
-    { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps) => `openh264enc bitrate=${kbps * 1000} gop-size=60 complexity=low rate-control=bitrate` },
+    { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps) => `nvh264enc bitrate=${kbps} gop-size=30 bframes=0 zerolatency=true rc-mode=cbr` },
+    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps) => `vah264enc bitrate=${kbps} key-int-max=30 b-frames=0 rate-control=cbr target-usage=7` },
+    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps) => `x264enc tune=zerolatency speed-preset=ultrafast bitrate=${kbps} key-int-max=30` },
+    { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps) => `openh264enc bitrate=${kbps * 1000} gop-size=30 complexity=low rate-control=bitrate` },
 ];
 
 function detectEncoders() {
@@ -76,7 +77,7 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         if (type === 6) au.push(Buffer.from(n));          // SEI
     }
 
-    function start({ fd, node, width, height, fps = 60, kbps = 12000, encoder, source, exact = false }) {
+    function start({ fd, node, width, height, fps = 30, kbps = 12000, encoder, source, exact = false }) {
         stop();
         lastConfig = '';
         const enc = encoder.pipe(kbps);
@@ -84,7 +85,7 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
         const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=1000 always-copy=true`;
         // exact: prosimy system o monitor dokładnie w rozmiarze telefonu (bez czarnych pasów)
-        const pipeline = `${src}${exact ? ` ! video/x-raw,width=${width},height=${height}` : ''} ! videorate drop-only=true ! video/x-raw,max-framerate=${fps}/1 `
+        const pipeline = `${src}${exact ? ` ! video/x-raw,width=${width},height=${height}` : ''} ! videorate ! video/x-raw,framerate=${fps}/1 `
             + `! videoconvert ! videoscale add-borders=true ! video/x-raw,width=${width},height=${height},pixel-aspect-ratio=1/1 `
             + `! ${enc} ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au ! fdsink fd=1 sync=false`;
         log.info(`GStreamer: ${pipeline}`);
