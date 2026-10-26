@@ -76,13 +76,15 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         if (type === 6) au.push(Buffer.from(n));          // SEI
     }
 
-    function start({ fd, node, width, height, fps = 60, kbps = 12000, encoder, source }) {
+    function start({ fd, node, width, height, fps = 60, kbps = 12000, encoder, source, exact = false }) {
         stop();
         lastConfig = '';
         const enc = encoder.pipe(kbps);
         // source: zamiennik PipeWire do testów (np. videotestsrc)
-        const src = source || `pipewiresrc fd=3 path=${node} do-timestamp=true keepalive-time=1000 always-copy=true`;
-        const pipeline = `${src} ! videorate drop-only=true ! video/x-raw,max-framerate=${fps}/1 `
+        // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
+        const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=1000 always-copy=true`;
+        // exact: prosimy system o monitor dokładnie w rozmiarze telefonu (bez czarnych pasów)
+        const pipeline = `${src}${exact ? ` ! video/x-raw,width=${width},height=${height}` : ''} ! videorate drop-only=true ! video/x-raw,max-framerate=${fps}/1 `
             + `! videoconvert ! videoscale add-borders=true ! video/x-raw,width=${width},height=${height},pixel-aspect-ratio=1/1 `
             + `! ${enc} ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au ! fdsink fd=1 sync=false`;
         log.info(`GStreamer: ${pipeline}`);

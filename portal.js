@@ -13,7 +13,7 @@ let tokenSeq = 0;
 const token = () => `pitayas${process.pid}_${++tokenSeq}`;
 
 async function createPortal({ log }) {
-    const bus = dbus.sessionBus({ negotiateUnixFd: true });
+    const bus = dbus.sessionBus();
     const obj = await bus.getProxyObject(DEST, PATH);
     const rd = obj.getInterface('org.freedesktop.portal.RemoteDesktop');
     const sc = obj.getInterface('org.freedesktop.portal.ScreenCast');
