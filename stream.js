@@ -83,7 +83,7 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         const enc = encoder.pipe(kbps);
         // source: zamiennik PipeWire do testów (np. videotestsrc)
         // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
-        const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=1000 always-copy=true`;
+        const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=100 always-copy=true`;
         // exact: prosimy system o monitor dokładnie w rozmiarze telefonu (bez czarnych pasów)
         const pipeline = `${src}${exact ? ` ! video/x-raw,width=${width},height=${height}` : ''} ! videorate ! video/x-raw,framerate=${fps}/1 `
             + `! videoconvert ! videoscale add-borders=true ! video/x-raw,width=${width},height=${height},pixel-aspect-ratio=1/1 `
