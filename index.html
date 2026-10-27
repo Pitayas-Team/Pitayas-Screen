@@ -47,6 +47,7 @@
       <div class="m-panel-body">
         <div class="stat"><div><b id="sSize">—</b><small>Rozdzielczość</small></div><div><b id="sFps">—</b><small>Kl/s</small></div><div><b id="sMbps">—</b><small>Mb/s</small></div></div>
         <div class="err" id="err"></div>
+      <div id="winHint" class="m-small" style="margin-top:8px" hidden></div>
       </div>
     </div>
 
@@ -57,7 +58,8 @@
         <div class="help">
           <b>iPhone:</b> podłącz kablem, zaufaj temu komputerowi, otwórz w aplikacji Pitayas moduł <b>Screen</b>.<br>
           <b>Android:</b> włącz <b>Opcje programisty → Debugowanie USB</b>, podłącz kablem i zezwól na debugowanie, otwórz moduł <b>Screen</b>.<br>
-          Przy pierwszym połączeniu system zapyta o udostępnienie ekranu — zgoda zostaje zapamiętana.
+          Linux: przy pierwszym połączeniu system zapyta o udostępnienie ekranu — zgoda zostaje zapamiętana.<br>
+          Windows: iPhone wymaga aplikacji <b>Apple Devices</b> (albo iTunes) — to ona obsługuje kabel.
         </div>
       </div>
     </div>
@@ -72,7 +74,8 @@
         <div class="m-update-details" id="updateDetails"><div id="updateInfo"></div><div style="display:flex; gap:8px;"><button class="m-btn small success" id="btnApplyUpdate">Zainstaluj aktualizację</button><button class="m-btn small accent" id="btnRestartApp" style="display:none;">Uruchom ponownie</button></div></div>
       </div>
       <div class="m-field"><label class="m-label" for="enc">Koder wideo</label><select id="enc" class="m-select"></select></div>
-      <div class="m-field"><span class="m-label">Zgoda systemu na ekran</span><div class="data-row"><code>zapamiętana — bez pytania przy każdym połączeniu</code><button class="m-btn small" id="btnForget">Zapomnij</button></div></div>
+      <div class="m-field" id="monField" hidden><label class="m-label" for="mon">Monitor dla telefonu</label><select id="mon" class="m-select"></select></div>
+      <div class="m-field" id="forgetField"><span class="m-label">Zgoda systemu na ekran</span><div class="data-row"><code>zapamiętana — bez pytania przy każdym połączeniu</code><button class="m-btn small" id="btnForget">Zapomnij</button></div></div>
       <div class="m-field"><span class="m-label">Folder danych (Pitaya Core)</span><div class="data-row"><code id="dataDirText">—</code><button class="m-btn small" id="btnOpenDataDir">Otwórz</button></div></div>
       <div class="m-small">Repozytorium: <a class="m-link" id="repoLink" href="#">github.com/Pitayas-Team/Pitayas-Screen</a></div>
     </div>
@@ -89,7 +92,16 @@
       $('sSize').textContent = st.size || '—';
       $('sFps').textContent = st.streaming ? st.fps || 0 : '—';
       $('sMbps').textContent = st.streaming ? st.mbps || 0 : '—';
-      $('err').textContent = st.error || s.cable.error || (s.encoders.length ? '' : 'Brak kodera H.264 w GStreamerze (zainstaluj gstreamer1-plugins-bad / openh264).');
+      const win = s.platform === 'win32';
+      $('err').textContent = st.error || s.cable.error || s.tools || (s.encoders.length ? '' : win ? 'Sprawdzam koder wideo…' : 'Brak kodera H.264 w GStreamerze (zainstaluj gstreamer1-plugins-bad / openh264).');
+      $('forgetField').hidden = win;
+      $('monField').hidden = !win;
+      if (win) {
+        $('mon').innerHTML = `<option value="">Automatycznie (wirtualny, inaczej główny)</option>` + (s.monitors || []).map((m) => `<option value="${esc(m.device)}" ${s.monitor === m.device ? 'selected' : ''}>${esc(`${m.adapter} — ${m.w}×${m.h}${m.primary ? ' (główny)' : ''}`)}</option>`).join('');
+        $('winHint').hidden = s.virtual;
+        $('winHint').innerHTML = 'Bez wirtualnego monitora telefon pokazuje kopię ekranu. Żeby był <b>dodatkowym</b> monitorem, zainstaluj darmowy <a class="m-link" href="#" id="vddLink">Virtual Display Driver</a> — Pitayas Screen sam ustawi mu rozdzielczość telefonu.';
+        const l = $('vddLink'); if (l) l.onclick = (e) => { e.preventDefault(); window.api.openUrl('https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/latest'); };
+      }
       const rows = [
         ...s.cable.iphone.map((d) => ({ ic: '', name: 'iPhone', sub: d.state === 'ok' ? 'Połączony' : 'Czeka na moduł Screen w aplikacji', on: d.state === 'ok' })),
         ...s.cable.android.map((d) => ({ ic: '🤖', name: `Android ${d.serial}`, sub: d.state === 'ok' ? 'Tunel USB gotowy' : d.state === 'unauthorized' ? 'Zezwól na debugowanie na telefonie' : d.state, on: d.state === 'ok', warn: d.state !== 'ok' })),
@@ -99,6 +111,7 @@
       $('enc').innerHTML = `<option value="auto">Automatycznie${s.encoders[0] ? ` — ${esc(s.encoders[0].label)}` : ''}</option>` + s.encoders.map((e) => `<option value="${e.id}" ${s.encoder === e.id ? 'selected' : ''}>${esc(e.label)}</option>`).join('');
     }
     $('enc').onchange = () => window.api.setEncoder($('enc').value);
+    $('mon').onchange = () => window.api.setMonitor($('mon').value);
     $('btnForget').onclick = async () => { await window.api.forget(); PitayaUI.showToast('Przy następnym połączeniu system zapyta ponownie', 'info'); };
     window.api.onState(render);
     window.api.state().then(render);

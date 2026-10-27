@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('api', {
   state: () => ipcRenderer.invoke('screen:state'),
   setEncoder: (id) => ipcRenderer.invoke('screen:set-encoder', id),
   forget: () => ipcRenderer.invoke('screen:forget'),
+  setMonitor: (dev) => ipcRenderer.invoke('screen:set-monitor', dev),
+  openUrl: (url) => ipcRenderer.invoke('screen:open-url', url),
   onState: (cb) => ipcRenderer.on('screen:state', (e, s) => cb(s)),
   quit: () => ipcRenderer.send('app-quit'),
 });

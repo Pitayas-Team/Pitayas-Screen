@@ -1,6 +1,6 @@
 {
   "name": "pitayas-screen",
-  "version": "0.1.1-beta",
+  "version": "0.1.2-beta",
   "description": "Pitayas Screen - telefon jako dodatkowy monitor (kabel albo Wi-Fi)",
   "author": "Pitayas <inbox@rakunek.com>",
   "main": "main.js",
@@ -31,7 +31,8 @@
     ],
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "rpm"
       ],
       "executableName": "pitayas-screen",
       "category": "Utility",
@@ -41,7 +42,29 @@
     "appImage": {
       "artifactName": "PitayasScreen-${version}-${arch}.${ext}"
     },
-    "copyright": "Copyright © 2026 Pitayas"
+    "copyright": "Copyright © 2026 Pitayas",
+    "asarUnpack": [
+      "win/host.ps1"
+    ],
+    "rpm": {
+      "artifactName": "pitayas-screen-${version}.${arch}.${ext}",
+      "depends": [
+        "gstreamer1-plugins-good",
+        "android-tools"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icons/512x512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PitayasScreen-Setup-${version}.${ext}",
+      "shortcutName": "Pitayas Screen"
+    }
   },
   "homepage": "https://github.com/Pitayas-Team/Pitayas-Screen",
   "allowScripts": {

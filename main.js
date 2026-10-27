@@ -12,10 +12,14 @@ const core = require('./core').create({
   name: 'Pitayas Screen',
   repo: 'Pitayas-Team/Pitayas-Screen',
   appDir: __dirname,
-  defaults: { port: 8195, encoder: 'auto', restoreToken: '' },
+  defaults: { port: 8195, encoder: 'auto', restoreToken: '', monitor: '' },
 });
-const { createPortal } = require('./portal');
-const { detectEncoders } = require('./stream');
+const WIN = process.platform === 'win32';
+// Linux: portal Wayland + GStreamer. Windows: wybrany/wirtualny monitor + FFmpeg (narzędzia pobierane przy pierwszym starcie)
+const { createPortal } = WIN ? require('./win/portal') : require('./portal');
+const detectEncoders = WIN ? require('./win/capture').detectEncoders : require('./stream').detectEncoders;
+const tools = WIN ? require('./win/tools').createTools({ dataDir: core.paths.data, log: core.log, onStatus: (t) => { toolStatus = t; pushState(); } }) : null;
+let toolStatus = '', monitors = [], adbPath = WIN ? null : 'adb';
 const { createSession } = require('./session');
 const usbmux = require('./usbmux');
 
@@ -29,6 +33,9 @@ const pushState = () => send('screen:state', state());
 const state = () => ({
   port: PORT(), encoders: encoders.map((e) => ({ id: e.id, label: e.label })), encoder: core.settings.get('encoder'),
   cable, stream: session ? session.status() : {},
+  platform: process.platform, tools: toolStatus,
+  monitors, monitor: core.settings.get('monitor'),
+  virtual: WIN ? monitors.some((m) => require('./win/portal').VIRTUAL.test(m.adapter)) : true,
 });
 
 function pickEncoder() {
@@ -39,14 +46,15 @@ function pickEncoder() {
 // ───── Android: tunel ADB przez kabel (adb reverse) — telefon łączy się z 127.0.0.1 ─────
 const reversed = new Set();
 function pollAdb() {
-  execFile('adb', ['devices'], { timeout: 5000 }, (err, out) => {
+  if (!adbPath) return;
+  execFile(adbPath, ['devices'], { timeout: 5000 }, (err, out) => {
     if (err) { cable.adb = false; cable.android = []; pushState(); return; }
     cable.adb = true;
     const list = String(out).split('\n').slice(1).map((l) => l.trim().split(/\s+/)).filter((p) => p[0] && p[1]);
     cable.android = list.map(([serial, st]) => ({ serial, state: st === 'device' ? 'ok' : st === 'unauthorized' ? 'unauthorized' : st }));
     for (const d of cable.android) {
       if (d.state !== 'ok' || reversed.has(d.serial)) continue;
-      execFile('adb', ['-s', d.serial, 'reverse', `tcp:${PORT()}`, `tcp:${PORT()}`], { timeout: 5000 }, (e) => {
+      execFile(adbPath, ['-s', d.serial, 'reverse', `tcp:${PORT()}`, `tcp:${PORT()}`], { timeout: 5000 }, (e) => {
         if (!e) { reversed.add(d.serial); core.log.info(`ADB: tunel do ${d.serial}`); pushState(); }
       });
     }
@@ -136,16 +144,26 @@ if (core.singleInstance(showWindow)) {
   core.registerIpc({ beforeRestart: () => { isQuitting = true; } });
   app.whenReady().then(async () => {
     createWindow();
-    encoders = detectEncoders();
+    if (WIN) {
+      // FFmpeg i adb pobierają się w tle przy pierwszym starcie; potem są od razu
+      try { encoders = detectEncoders(await tools.ensure('ffmpeg')); } catch (err) { cable.error = `FFmpeg: ${err.message}`; core.log.error(err); }
+      tools.ensure('adb').then((p) => { adbPath = p; pollAdb(); }).catch((err) => { core.log.warn('adb:', err.message); cable.adb = false; pushState(); });
+    } else encoders = detectEncoders();
     core.log.info(`Kodery: ${encoders.map((e) => e.id).join(', ') || 'brak'}`);
     let portal;
-    try { portal = await createPortal({ log: core.log }); }
+    try { portal = await createPortal({ log: core.log, appDir: __dirname, getMonitor: () => core.settings.get('monitor') }); }
     catch (err) { cable.error = `Portal: ${err.message}`; core.log.error(err); pushState(); return; }
     session = createSession({
       portal, log: core.log, getEncoder: pickEncoder,
       getRestoreToken: () => core.settings.get('restoreToken'), setRestoreToken: (t) => core.settings.set('restoreToken', t),
       onStatus: (st) => { core.setStatus(st); pushState(); },
+      getFfmpeg: () => tools.ensure('ffmpeg'),
     });
+    if (WIN) {
+      const refresh = async () => { monitors = await portal.monitors(); pushState(); };
+      refresh();
+      setInterval(refresh, 5000);   // np. po zainstalowaniu wirtualnego monitora
+    }
     startServer();
     pollAdb();
     setInterval(pollAdb, 3000);
@@ -161,4 +179,6 @@ ipcMain.on('pitaya:win-close', () => mainWindow && mainWindow.hide());
 ipcMain.on('app-quit', () => { isQuitting = true; app.quit(); });
 ipcMain.handle('screen:state', () => state());
 ipcMain.handle('screen:set-encoder', (e, id) => { core.settings.set('encoder', id); return state(); });
+ipcMain.handle('screen:set-monitor', (e, dev) => { core.settings.set('monitor', dev || ''); return state(); });
+ipcMain.handle('screen:open-url', (e, url) => { if (/^https:\/\//.test(url)) require('electron').shell.openExternal(url); });
 ipcMain.handle('screen:forget', () => { core.settings.set('restoreToken', ''); return true; });

@@ -8,7 +8,7 @@ const { spawn, execFileSync } = require('child_process');
 const ENCODERS = [
     { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps) => `nvh264enc bitrate=${kbps} gop-size=30 bframes=0 zerolatency=true rc-mode=cbr` },
     { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps) => `vah264enc bitrate=${kbps} key-int-max=30 b-frames=0 rate-control=cbr target-usage=7` },
-    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps) => `x264enc tune=zerolatency speed-preset=ultrafast bitrate=${kbps} key-int-max=30` },
+    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps) => `x264enc tune=zerolatency sliced-threads=false speed-preset=ultrafast bitrate=${kbps} key-int-max=30` },
     { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps) => `openh264enc bitrate=${kbps * 1000} gop-size=30 complexity=low rate-control=bitrate` },
 ];
 
@@ -77,9 +77,10 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         if (type === 6) au.push(Buffer.from(n));          // SEI
     }
 
-    function start({ fd, node, width, height, fps = 30, kbps = 12000, encoder, source, exact = false }) {
+    function start({ fd, node, width, height, fps = 30, kbps = 12000, encoder, source, exact = false, mon, ffmpeg }) {
         stop();
         lastConfig = '';
+        if (process.platform === 'win32') return startWin({ mon, ffmpeg, width, height, fps, kbps, encoder });
         const enc = encoder.pipe(kbps);
         // source: zamiennik PipeWire do testów (np. videotestsrc)
         // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
@@ -90,18 +91,29 @@ function createStream({ log, onConfig, onFrame, onExit }) {
             + `! ${enc} ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au ! fdsink fd=1 sync=false`;
         log.info(`GStreamer: ${pipeline}`);
         child = spawn('gst-launch-1.0', ['-q', ...pipeline.split(' ')], { stdio: ['ignore', 'pipe', 'pipe', fd == null ? 'ignore' : fd] });
+        attach(child);
+    }
+
+    // Windows: FFmpeg (gdigrab + koder karty graficznej) zamiast GStreamera — reszta (podział na klatki) bez zmian
+    function startWin({ mon, ffmpeg, width, height, fps, kbps, encoder }) {
+        const args = require('./win/capture').ffmpegArgs({ mon, width, height, fps, kbps, encoder });
+        log.info(`FFmpeg: ${args.join(' ')}`);
+        child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        attach(child);
+    }
+
+    function attach(proc) {
         let err = '';
-        child.stderr.on('data', (c) => { err = (err + c).slice(-2000); });
-        child.stdout.on('data', (chunk) => {
+        proc.stderr.on('data', (c) => { err = (err + c).slice(-2000); });
+        proc.stdout.on('data', (chunk) => {
             const { nals, rest } = splitNals(pending.length ? Buffer.concat([pending, chunk]) : chunk);
             pending = Buffer.from(rest);
             nals.forEach(handleNal);
         });
-        const me = child;
-        child.on('exit', (code) => {
-            if (me !== child) return;
+        proc.on('exit', (code) => {
+            if (proc !== child) return;
             child = null;
-            if (code) log.warn(`GStreamer zakończył się kodem ${code}: ${err.trim().split('\n').pop()}`);
+            if (code) log.warn(`Koder zakończył się kodem ${code}: ${err.trim().split('\n').pop()}`);
             onExit && onExit(code, err);
         });
     }

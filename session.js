@@ -11,7 +11,8 @@ const { createStream } = require('./stream');
 const QUALITY = { high: 16000, mid: 9000, low: 4500 };
 const KEYSYM = { Enter: 0xff0d, Backspace: 0xff08, Tab: 0xff09, Escape: 0xff1b, Left: 0xff51, Up: 0xff52, Right: 0xff53, Down: 0xff54, Delete: 0xffff };
 
-function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreToken, onStatus }) {
+function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreToken, onStatus, getFfmpeg }) {
+    const WIN = process.platform === 'win32';
     let viewer = null, size = null, config = null, waitingKey = true, idleTimer = null, frames = 0, bytes = 0, lastStat = Date.now();
     let starting = null, lastStart = null;
     const status = { streaming: false, size: null, fps: 0, mbps: 0, via: '', error: '' };
@@ -44,14 +45,14 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
         },
         onExit: (code, err) => {
             // Dokładny rozmiar nie przeszedł (system go nie przyjął) — jeszcze raz ze skalowaniem
-            if (code && lastStart && lastStart.exact && Date.now() - lastStart.at < 5000 && viewer) {
+            if (!WIN && code && lastStart && lastStart.exact && Date.now() - lastStart.at < 5000 && viewer) {
                 log.warn('Dokładny rozmiar monitora nie przeszedł — skaluję obraz');
                 lastStart.exact = false;
                 stream.start({ fd: null, exact: false, node: portal.node(), width: lastStart.w, height: lastStart.h, kbps: QUALITY[lastStart.quality] || QUALITY.mid, encoder: getEncoder() });
                 return;
             }
             status.streaming = false;
-            if (code) status.error = `GStreamer: ${String(err || '').trim().split('\n').pop() || code}`;
+            if (code) status.error = `${WIN ? 'FFmpeg' : 'GStreamer'}: ${String(err || '').trim().split('\n').pop() || code}`;
             emit();
         },
     });
@@ -73,6 +74,14 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
         waitingKey = true;
         log.info(`Start obrazu ${w}×${h}`);
         lastStart = { w, h, quality, at: Date.now(), exact: true };
+        if (WIN) {
+            const ffmpeg = await getFfmpeg();
+            await portal.fit(w, h);
+            stream.start({ mon: portal.monitor(), ffmpeg, width: w, height: h, kbps: QUALITY[quality] || QUALITY.mid, encoder: getEncoder() });
+            Object.assign(status, { streaming: true, size: `${w}×${h}`, error: '' });
+            emit();
+            return;
+        }
         stream.start({ fd: null, exact: true, node: portal.node(), width: w, height: h, kbps: QUALITY[quality] || QUALITY.mid, encoder: getEncoder() });
         Object.assign(status, { streaming: true, size: `${w}×${h}`, error: '' });
         emit();
