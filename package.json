@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "electron": "^32.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.pitayas.screen",
@@ -47,11 +47,7 @@
       "win/host.ps1"
     ],
     "rpm": {
-      "artifactName": "pitayas-screen-${version}.${arch}.${ext}",
-      "depends": [
-        "gstreamer1-plugins-good",
-        "android-tools"
-      ]
+      "artifactName": "pitayas-screen-${version}.${arch}.${ext}"
     },
     "win": {
       "target": [
