@@ -6,10 +6,10 @@ const { spawn, execFileSync } = require('child_process');
 // Klatka kluczowa co 30 klatek = co sekundę (stałe 30 kl/s z videorate — pusty pulpit też daje klatki, więc obraz pojawia się od razu)
 // Kolejność: NVIDIA, VA-API (Intel/AMD), x264, OpenH264. Pierwszy, który działa na tym komputerze, wygrywa.
 const ENCODERS = [
-    { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps) => `nvh264enc bitrate=${kbps} gop-size=30 bframes=0 zerolatency=true rc-mode=cbr` },
-    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps) => `vah264enc bitrate=${kbps} key-int-max=30 b-frames=0 rate-control=cbr target-usage=7` },
-    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps) => `x264enc tune=zerolatency sliced-threads=false speed-preset=ultrafast bitrate=${kbps} key-int-max=30` },
-    { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps) => `openh264enc bitrate=${kbps * 1000} gop-size=30 complexity=low rate-control=bitrate` },
+    { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps, g = 30) => `nvh264enc bitrate=${kbps} gop-size=${g} bframes=0 zerolatency=true rc-mode=cbr` },
+    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps, g = 30) => `vah264enc bitrate=${kbps} key-int-max=${g} b-frames=0 rate-control=cbr target-usage=7` },
+    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps, g = 30) => `x264enc tune=zerolatency sliced-threads=false speed-preset=ultrafast bitrate=${kbps} key-int-max=${g}` },
+    { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps, g = 30) => `openh264enc bitrate=${kbps * 1000} gop-size=${g} complexity=low rate-control=bitrate` },
 ];
 
 function detectEncoders() {
@@ -81,7 +81,7 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         stop();
         lastConfig = '';
         if (process.platform === 'win32') return startWin({ mon, ffmpeg, width, height, fps, kbps, encoder });
-        const enc = encoder.pipe(kbps);
+        const enc = encoder.pipe(kbps, fps);
         // source: zamiennik PipeWire do testów (np. videotestsrc)
         // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
         const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=100 always-copy=true`;

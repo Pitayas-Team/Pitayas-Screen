@@ -8,7 +8,12 @@
 // Komputer → telefon: {t:'config', codec, description, w, h} (JSON) i klatki binarne [1 bajt: klucz][H.264 avcC]
 const { createStream } = require('./stream');
 
-const QUALITY = { high: 16000, mid: 9000, low: 4500 };
+// Bitrate zależy od wielkości obrazu (kb/s na megapiksel przy 60 kl/s) — duży ekran tabletu potrzebuje dużo więcej niż telefon.
+// Kabel USB spokojnie mieści 40 Mb/s.
+const QUALITY = { high: 14000, mid: 9000, low: 4500 };
+const bitrate = (w, h, quality, fps) => Math.round(Math.max(3000, Math.min(40000, (QUALITY[quality] || QUALITY.mid) * (w * h) / 1e6 * (fps >= 60 ? 1 : 0.7))));
+// Kodery sprzętowe dają radę 60 kl/s; procesor (x264/OpenH264) — 30
+const fpsFor = (enc) => (enc && /nv|va|qsv|amf/.test(enc.id) ? 60 : 30);
 const KEYSYM = { Enter: 0xff0d, Backspace: 0xff08, Tab: 0xff09, Escape: 0xff1b, Left: 0xff51, Up: 0xff52, Right: 0xff53, Down: 0xff54, Delete: 0xffff };
 
 function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreToken, onStatus, getFfmpeg }) {
@@ -48,7 +53,8 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
             if (!WIN && code && lastStart && lastStart.exact && Date.now() - lastStart.at < 5000 && viewer) {
                 log.warn('Dokładny rozmiar monitora nie przeszedł — skaluję obraz');
                 lastStart.exact = false;
-                stream.start({ fd: null, exact: false, node: portal.node(), width: lastStart.w, height: lastStart.h, kbps: QUALITY[lastStart.quality] || QUALITY.mid, encoder: getEncoder() });
+                const enc = getEncoder(), fps = fpsFor(enc);
+                stream.start({ fd: null, exact: false, node: portal.node(), width: lastStart.w, height: lastStart.h, fps, kbps: bitrate(lastStart.w, lastStart.h, lastStart.quality, fps), encoder: enc });
                 return;
             }
             status.streaming = false;
@@ -77,12 +83,14 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
         if (WIN) {
             const ffmpeg = await getFfmpeg();
             await portal.fit(w, h);
-            stream.start({ mon: portal.monitor(), ffmpeg, width: w, height: h, kbps: QUALITY[quality] || QUALITY.mid, encoder: getEncoder() });
+            const enc = getEncoder(), fps = fpsFor(enc);
+            stream.start({ mon: portal.monitor(), ffmpeg, width: w, height: h, fps, kbps: bitrate(w, h, quality, fps), encoder: enc });
             Object.assign(status, { streaming: true, size: `${w}×${h}`, error: '' });
             emit();
             return;
         }
-        stream.start({ fd: null, exact: true, node: portal.node(), width: w, height: h, kbps: QUALITY[quality] || QUALITY.mid, encoder: getEncoder() });
+        const enc = getEncoder(), fps = fpsFor(enc);
+        stream.start({ fd: null, exact: true, node: portal.node(), width: w, height: h, fps, kbps: bitrate(w, h, quality, fps), encoder: enc });
         Object.assign(status, { streaming: true, size: `${w}×${h}`, error: '' });
         emit();
     }
