@@ -1,6 +1,6 @@
 {
   "name": "pitayas-screen",
-  "version": "0.1.2-beta",
+  "version": "0.1.3-beta",
   "description": "Pitayas Screen - telefon jako dodatkowy monitor (kabel albo Wi-Fi)",
   "author": "Pitayas <inbox@rakunek.com>",
   "main": "main.js",
