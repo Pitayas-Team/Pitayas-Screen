@@ -27,7 +27,7 @@ async function createPortal({ log, appDir, getMonitor }) {
             buf = buf.slice(nl + 1);
             if (line === 'ready') { readyResolve(); continue; }
             const r = replies.shift();
-            if (r) r(line);
+            if (r && !r.dead) { r.settled = true; r.resolve(line); }   // spóźniona odpowiedź na zakończone czasem zapytanie jest odrzucana
         }
     });
     host.stderr.on('data', (c) => log.warn('PowerShell:', String(c).trim().slice(0, 300)));
@@ -35,7 +35,12 @@ async function createPortal({ log, appDir, getMonitor }) {
     await Promise.race([ready, new Promise((_, rej) => setTimeout(() => rej(new Error('PowerShell nie odpowiada')), 20000))]);
 
     const cmd = (line) => { try { host.stdin.write(`${line}\n`); } catch {} };
-    const ask = (line) => new Promise((resolve) => { replies.push(resolve); cmd(line); setTimeout(() => resolve(''), 5000); });
+    const ask = (line, ms = 5000) => new Promise((resolve) => {
+        const e = { resolve, dead: false, settled: false };
+        replies.push(e);
+        cmd(line);
+        setTimeout(() => { if (!e.settled) { e.dead = true; resolve(''); } }, ms);
+    });
 
     async function monitors() {
         try { return JSON.parse(await ask('mon')) || []; } catch { return []; }
@@ -58,27 +63,47 @@ async function createPortal({ log, appDir, getMonitor }) {
         return { node: 0, restoreToken: '' };
     }
 
-    // Wirtualny monitor dostaje dokładnie rozdzielczość telefonu (jeśli sterownik ma taki tryb); zwykły zostaje jak jest
+    // Najbliższy tryb z listy monitora: proporcje ważniejsze niż liczba pikseli (żeby nie było czarnych pasów)
+    function pickMode(modes, w, h) {
+        let best = null, bestScore = Infinity;
+        for (const [mw, mh] of modes) {
+            const score = Math.abs(Math.log((mw / mh) / (w / h))) * 4 + Math.abs(Math.log((mw * mh) / (w * h)));
+            if (score < bestScore) { bestScore = score; best = [mw, mh]; }
+        }
+        return best;
+    }
+    const getModes = async (device) => { try { return JSON.parse(await ask(`modes ${device}`)) || []; } catch { return []; } };
+    const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+
+    // Dopasowuje monitor do telefonu i zwraca rozmiar strumienia [w, h].
+    //  • wirtualny monitor: ustawiamy mu najbliższy tryb z listy sterownika (rozdzielczość telefonu albo najbliższa),
+    //  • zwykły monitor (lustro): zostaje, jak jest.
+    // Strumień idzie w natywnym rozmiarze monitora (bez skalowania po stronie komputera); zmniejszamy go tylko, gdy jest większy niż ekran telefonu.
     async function fit(w, h) {
         target = [w, h];
-        if (!mon) return;
-        if (VIRTUAL.test(mon.adapter) && (mon.w !== w || mon.h !== h)) {
-            const r = await ask(`mode ${mon.device} ${w} ${h}`);
-            if (r === '0') log.info(`Wirtualny monitor: ustawiono ${w}×${h}`);
-            else log.warn(`Wirtualny monitor nie ma trybu ${w}×${h} — obraz będzie przeskalowany`);
-            const fresh = (await monitors()).find((m) => m.device === mon.device);
-            if (fresh) mon = fresh;
+        mon = (await pick()) || mon;   // wirtualny monitor mógł pojawić się po starcie aplikacji
+        if (!mon) return [w, h];
+        if (VIRTUAL.test(mon.adapter)) {
+            const best = pickMode(await getModes(mon.device), w, h);
+            if (best && (best[0] !== mon.w || best[1] !== mon.h)) {
+                const r = await ask(`mode ${mon.device} ${best[0]} ${best[1]}`);
+                if (r === '0') log.info(`Wirtualny monitor: tryb ${best[0]}×${best[1]} (telefon ${w}×${h})`);
+                else log.warn(`Nie udało się ustawić trybu ${best[0]}×${best[1]} na wirtualnym monitorze (odpowiedź: ${r || 'brak'})`);
+                const fresh = (await monitors()).find((m) => m.device === mon.device);
+                if (fresh) mon = fresh;
+            }
         }
-        // Obraz monitora wpisany w ekran telefonu (z czarnymi pasami, gdy proporcje się różnią)
-        const s = Math.min(w / mon.w, h / mon.h);
-        frame = { s, ox: (w - mon.w * s) / 2, oy: (h - mon.h * s) / 2 };
+        const k = Math.min(1, w / mon.w, h / mon.h);
+        const out = [even(mon.w * k), even(mon.h * k)];
+        frame = { sx: out[0] / mon.w, sy: out[1] / mon.h };
+        return out;
     }
 
-    // x, y w pikselach obrazu telefonu → piksele pulpitu Windows
+    // x, y w pikselach obrazu strumienia → piksele pulpitu Windows
     function toDesktop(x, y) {
         if (!mon || !frame) return null;
-        const mx = Math.max(0, Math.min(mon.w - 1, (x - frame.ox) / frame.s));
-        const my = Math.max(0, Math.min(mon.h - 1, (y - frame.oy) / frame.s));
+        const mx = Math.max(0, Math.min(mon.w - 1, x / frame.sx));
+        const my = Math.max(0, Math.min(mon.h - 1, y / frame.sy));
         return [Math.round(mon.x + mx), Math.round(mon.y + my)];
     }
 
@@ -88,6 +113,7 @@ async function createPortal({ log, appDir, getMonitor }) {
         fit,
         monitor: () => mon,
         monitors,
+        vddCount: async () => Number(await ask('vdd', 20000)) || 0,   // 0 = sterownik wirtualnego monitora niezainstalowany
         node: () => 0,
         active: () => session,
         setSize: (w, h) => { target = [w, h]; },

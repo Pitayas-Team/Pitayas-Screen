@@ -6,6 +6,8 @@
 #   c KOD          znak Unicode
 #   k VK           klawisz (kod wirtualny Windows)
 #   mon            lista monitorów (JSON, jedna linia)
+#   modes DEV      lista rozdzielczości monitora DEV (JSON [[w,h],…])
+#   vdd            ile urządzeń „Virtual Display Driver” jest w systemie (0 = sterownik niezainstalowany)
 #   mode DEV W H   ustaw rozdzielczość monitora DEV (np. \\.\DISPLAY2); odpowiedź: 0 = OK, -1 = brak takiego trybu
 $ErrorActionPreference = 'Continue'
 Add-Type -TypeDefinition @'
@@ -87,13 +89,34 @@ public static class PitayasHost {
         }
         return sb.Append("]").ToString();
     }
+    // Lista rozdzielczości, które monitor obsługuje: [[w,h],…]
+    public static string Modes(string dev) {
+        DEVMODE dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+        System.Collections.Generic.HashSet<string> seen = new System.Collections.Generic.HashSet<string>();
+        StringBuilder sb = new StringBuilder("[");
+        bool first = true;
+        for (int i = 0; EnumDisplaySettings(dev, i, ref dm); i++) {
+            string k = dm.dmPelsWidth + "x" + dm.dmPelsHeight;
+            if (!seen.Add(k)) continue;
+            if (!first) sb.Append(",");
+            first = false;
+            sb.AppendFormat("[{0},{1}]", dm.dmPelsWidth, dm.dmPelsHeight);
+        }
+        return sb.Append("]").ToString();
+    }
+    // Ustawia rozdzielczość; spośród trybów o takim rozmiarze wybiera 60 Hz (albo najwyższą poniżej 60)
     public static int SetMode(string dev, int w, int h) {
         DEVMODE dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-        int found = -1;
-        for (int i = 0; EnumDisplaySettings(dev, i, ref dm); i++) if (dm.dmPelsWidth == w && dm.dmPelsHeight == h) { found = i; break; }
+        int found = -1, bestScore = -1;
+        for (int i = 0; EnumDisplaySettings(dev, i, ref dm); i++) {
+            if (dm.dmPelsWidth != w || dm.dmPelsHeight != h) continue;
+            int hz = dm.dmDisplayFrequency;
+            int score = hz == 60 ? 1000 : (hz < 60 ? hz : 0);
+            if (score > bestScore) { bestScore = score; found = i; }
+        }
         if (found < 0) return -1;
         EnumDisplaySettings(dev, found, ref dm);
-        dm.dmFields = 0x80000 | 0x100000;   // DM_PELSWIDTH | DM_PELSHEIGHT
+        dm.dmFields = 0x80000 | 0x100000 | 0x400000;   // DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY
         return ChangeDisplaySettingsEx(dev, ref dm, IntPtr.Zero, 0x1, IntPtr.Zero);   // CDS_UPDATEREGISTRY
     }
 }
@@ -111,9 +134,14 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             'c' { [PitayasHost]::Char([int]$p[1]) }
             'k' { [PitayasHost]::Vk([uint16]$p[1]) }
             'mon' { [Console]::Out.WriteLine([PitayasHost]::Monitors()); [Console]::Out.Flush() }
+            'modes' { [Console]::Out.WriteLine([PitayasHost]::Modes($p[1])); [Console]::Out.Flush() }
+            'vdd' {
+                $n = @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -contains 'Root\MttVDD' }).Count
+                [Console]::Out.WriteLine($n); [Console]::Out.Flush()
+            }
             'mode' { [Console]::Out.WriteLine([PitayasHost]::SetMode($p[1], [int]$p[2], [int]$p[3])); [Console]::Out.Flush() }
         }
     } catch {
-        if ($p[0] -eq 'mon' -or $p[0] -eq 'mode') { [Console]::Out.WriteLine('-2'); [Console]::Out.Flush() }
+        if ($p[0] -eq 'mon' -or $p[0] -eq 'mode' -or $p[0] -eq 'modes' -or $p[0] -eq 'vdd') { [Console]::Out.WriteLine('-2'); [Console]::Out.Flush() }
     }
 }

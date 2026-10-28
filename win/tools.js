@@ -74,4 +74,4 @@ function createTools({ dataDir, log, onStatus }) {
     return { ensure, cached: (name) => findExe(path.join(root, name), SOURCES[name].exe) || onPath(SOURCES[name].exe) };
 }
 
-module.exports = { createTools };
+module.exports = { createTools, download, findExe };

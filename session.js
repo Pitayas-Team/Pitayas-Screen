@@ -14,6 +14,16 @@ const QUALITY = { high: 14000, mid: 9000, low: 4500 };
 const bitrate = (w, h, quality, fps) => Math.round(Math.max(3000, Math.min(40000, (QUALITY[quality] || QUALITY.mid) * (w * h) / 1e6 * (fps >= 60 ? 1 : 0.7))));
 // Kodery sprzętowe dają radę 60 kl/s; procesor (x264/OpenH264) — 30
 const fpsFor = (enc) => (enc && /nv|va|qsv|amf/.test(enc.id) ? 60 : 30);
+// Koder procesorowy nie utrzyma klatek na bardzo dużym obrazie — zmniejszamy go (telefon powiększa, a obraz jest stabilny).
+// Sprzętowy (NVIDIA/Intel/AMD) dostaje pełną, natywną rozdzielczość tabletu.
+const SOFT_MAX_PIXELS = 2300000;
+const isSoft = (enc) => !enc || /^(x264enc|openh264enc|libx264)$/.test(enc.id);
+function limitSize(w, h, enc) {
+    const px = w * h;
+    if (!isSoft(enc) || px <= SOFT_MAX_PIXELS) return [w, h];
+    const k = Math.sqrt(SOFT_MAX_PIXELS / px);
+    return [Math.round((w * k) / 2) * 2, Math.round((h * k) / 2) * 2];
+}
 const KEYSYM = { Enter: 0xff0d, Backspace: 0xff08, Tab: 0xff09, Escape: 0xff1b, Left: 0xff51, Up: 0xff52, Right: 0xff53, Down: 0xff54, Delete: 0xffff };
 
 function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreToken, onStatus, getFfmpeg }) {
@@ -67,6 +77,7 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
         // Parzyste wymiary (wymóg H.264), rozsądne granice
         w = Math.max(320, Math.min(3840, Math.round(w / 2) * 2));
         h = Math.max(320, Math.min(3840, Math.round(h / 2) * 2));
+        [w, h] = limitSize(w, h, getEncoder());
         if (!portal.active()) {
             const r = await Promise.race([
                 portal.start({ restoreToken: getRestoreToken() }),
@@ -82,7 +93,9 @@ function createSession({ portal, log, getEncoder, getRestoreToken, setRestoreTok
         lastStart = { w, h, quality, at: Date.now(), exact: true };
         if (WIN) {
             const ffmpeg = await getFfmpeg();
-            await portal.fit(w, h);
+            // Monitor dopasowuje się do telefonu i mówi, jaki rozmiar ma strumień (natywny rozmiar monitora, bez skalowania na siłę)
+            [w, h] = await portal.fit(w, h);
+            size = [w, h];
             const enc = getEncoder(), fps = fpsFor(enc);
             stream.start({ mon: portal.monitor(), ffmpeg, width: w, height: h, fps, kbps: bitrate(w, h, quality, fps), encoder: enc });
             Object.assign(status, { streaming: true, size: `${w}×${h}`, error: '' });

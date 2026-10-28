@@ -5,21 +5,26 @@ const { spawn, execFileSync } = require('child_process');
 
 // Klatka kluczowa co 30 klatek = co sekundę (stałe 30 kl/s z videorate — pusty pulpit też daje klatki, więc obraz pojawia się od razu)
 // Kolejność: NVIDIA, VA-API (Intel/AMD), x264, OpenH264. Pierwszy, który działa na tym komputerze, wygrywa.
+// pipe(kbps, gop, heavy): heavy = bardzo duży obraz (koder procesorowy dostaje szybszy preset, żeby utrzymać klatki)
 const ENCODERS = [
     { id: 'nvh264enc', label: 'NVIDIA (sprzętowy)', pipe: (kbps, g = 30) => `nvh264enc bitrate=${kbps} gop-size=${g} bframes=0 zerolatency=true rc-mode=cbr` },
-    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps, g = 30) => `vah264enc bitrate=${kbps} key-int-max=${g} b-frames=0 rate-control=cbr target-usage=7` },
-    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps, g = 30) => `x264enc tune=zerolatency sliced-threads=false speed-preset=ultrafast bitrate=${kbps} key-int-max=${g}` },
+    { id: 'vah264enc', label: 'VA-API (sprzętowy)', pipe: (kbps, g = 30) => `vah264enc bitrate=${kbps} key-int-max=${g} b-frames=0 rate-control=cbr target-usage=4` },
+    { id: 'x264enc', label: 'x264 (procesor)', pipe: (kbps, g = 30, heavy = false) => `x264enc tune=zerolatency sliced-threads=false speed-preset=${heavy ? 'ultrafast' : 'superfast'} bitrate=${kbps} key-int-max=${g}` },
     { id: 'openh264enc', label: 'OpenH264 (procesor)', pipe: (kbps, g = 30) => `openh264enc bitrate=${kbps * 1000} gop-size=${g} complexity=low rate-control=bitrate` },
 ];
+// Profil High daje wyraźnie lepszy obraz przy tym samym bitrate (CABAC, 8×8). Używamy go, gdy koder go przyjmie.
+const HIGH = 'video/x-h264,profile=high';
+const SOFT = new Set(['x264enc', 'openh264enc']);   // kodery procesorowe
 
 function detectEncoders() {
     const ok = [];
+    const probe = (e, high) => {
+        execFileSync('gst-launch-1.0', ['-q', 'videotestsrc', 'num-buffers=2', '!', 'video/x-raw,width=640,height=360', '!', 'videoconvert', '!',
+            ...e.pipe(4000).split(' '), ...(high ? ['!', HIGH] : []), '!', 'fakesink'], { timeout: 8000, stdio: 'ignore' });
+    };
     for (const e of ENCODERS) {
-        try {
-            execFileSync('gst-launch-1.0', ['-q', 'videotestsrc', 'num-buffers=2', '!', 'video/x-raw,width=640,height=360', '!', 'videoconvert', '!',
-                ...e.pipe(4000).split(' '), '!', 'fakesink'], { timeout: 8000, stdio: 'ignore' });
-            ok.push(e);
-        } catch {}
+        try { probe(e, true); ok.push({ ...e, high: true }); continue; } catch {}
+        try { probe(e, false); ok.push({ ...e, high: false }); } catch {}
     }
     return ok;
 }
@@ -81,7 +86,8 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         stop();
         lastConfig = '';
         if (process.platform === 'win32') return startWin({ mon, ffmpeg, width, height, fps, kbps, encoder });
-        const enc = encoder.pipe(kbps, fps);
+        const heavy = width * height > 2200000;
+        const enc = `${encoder.pipe(kbps, fps, heavy)}${encoder.high ? ` ! ${HIGH}` : ''}`;
         // source: zamiennik PipeWire do testów (np. videotestsrc)
         // Bez fd: aplikacja nie jest w piaskownicy, więc łączy się z PipeWire użytkownika bezpośrednio po numerze węzła
         const src = source || `pipewiresrc${fd == null ? '' : ' fd=3'} path=${node} do-timestamp=true keepalive-time=100 always-copy=true`;
@@ -94,18 +100,29 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         attach(child);
     }
 
-    // Windows: FFmpeg (gdigrab + koder karty graficznej) zamiast GStreamera — reszta (podział na klatki) bez zmian
+    // Windows: FFmpeg zamiast GStreamera — reszta (podział na klatki) bez zmian.
+    // Sposoby przechwycenia próbujemy po kolei (szybki ddagrab, potem gdigrab): gdy pierwszy padnie, zanim da jakąkolwiek klatkę,
+    // od razu startujemy następny, a telefon nic nie zauważa.
     function startWin({ mon, ffmpeg, width, height, fps, kbps, encoder }) {
-        const args = require('./win/capture').ffmpegArgs({ mon, width, height, fps, kbps, encoder });
-        log.info(`FFmpeg: ${args.join(' ')}`);
-        child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-        attach(child);
+        const capture = require('./win/capture');
+        const backends = capture.backendsFor(ffmpeg, mon);
+        let i = 0;
+        const launch = () => {
+            const backend = backends[i];
+            const args = capture.ffmpegArgs({ mon, width, height, fps, kbps, encoder, backend });
+            log.info(`FFmpeg (${backend.name}): ${args.join(' ')}`);
+            child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            attach(child, i + 1 < backends.length ? () => { i++; log.warn(`Przechwytywanie ${backend.name} nie ruszyło — próbuję ${backends[i].name}`); pending = Buffer.alloc(0); launch(); } : null);
+        };
+        launch();
     }
 
-    function attach(proc) {
-        let err = '';
+    // retry: wywoływane zamiast onExit, gdy proces padł zanim wysłał pierwsze dane
+    function attach(proc, retry = null) {
+        let err = '', gotData = false;
         proc.stderr.on('data', (c) => { err = (err + c).slice(-2000); });
         proc.stdout.on('data', (chunk) => {
+            gotData = true;
             const { nals, rest } = splitNals(pending.length ? Buffer.concat([pending, chunk]) : chunk);
             pending = Buffer.from(rest);
             nals.forEach(handleNal);
@@ -113,6 +130,7 @@ function createStream({ log, onConfig, onFrame, onExit }) {
         proc.on('exit', (code) => {
             if (proc !== child) return;
             child = null;
+            if (code && !gotData && retry) return retry();
             if (code) log.warn(`Koder zakończył się kodem ${code}: ${err.trim().split('\n').pop()}`);
             onExit && onExit(code, err);
         });
@@ -130,4 +148,4 @@ function createStream({ log, onConfig, onFrame, onExit }) {
     return { start, stop, running: () => Boolean(child), lastConfig: () => lastConfig };
 }
 
-module.exports = { createStream, detectEncoders, ENCODERS };
+module.exports = { createStream, detectEncoders, ENCODERS, SOFT };

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
   <title>Pitayas Screen</title>
   <link rel="stylesheet" href="core/ui/pitaya-theme.css">
   <style>
@@ -86,6 +86,30 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const esc = (s) => PitayaUI.escapeHTML(s);
+    // Karta „Wirtualny monitor” (Windows): bez sterownika telefon jest tylko kopią ekranu, a Windows nie widzi go w ustawieniach monitorów
+    let vddBusy = false;
+    async function vddRun(call, doing) {
+      if (vddBusy) return;
+      vddBusy = true;
+      const r = await call();
+      vddBusy = false;
+      if (!r.ok) PitayaUI.showToast(r.error || 'Nie udało się', 'error');
+    }
+    function renderVdd(s) {
+      const v = s.vdd || {};
+      const box = $('winHint');
+      box.hidden = false;
+      let html;
+      if (v.busy) html = `<b>Wirtualny monitor</b><br>${esc(v.message || 'Pracuję…')}`;
+      else if (!v.installed && !s.virtual) html = `<b>Wirtualny monitor</b><br>Windows nie widzi telefonu jako monitora, bo brakuje sterownika. Zainstaluj go raz (potrzebna zgoda administratora) — telefon pojawi się w <i>Ustawienia → System → Ekran</i> jako prawdziwy dodatkowy monitor.<br><button class="m-btn small accent" id="vddInstall" style="margin-top:8px">Zainstaluj wirtualny monitor</button>`;
+      else if (!s.virtual) html = `<b>Wirtualny monitor</b><br>Sterownik jest zainstalowany, ale monitor nie jest włączony w pulpicie.<br><button class="m-btn small accent" id="vddExtend" style="margin-top:8px">Włącz monitor</button> <button class="m-btn small" id="vddRemove" style="margin-top:8px">Usuń sterownik</button>`;
+      else html = `<b>Wirtualny monitor aktywny</b><br>Telefon jest dodatkowym monitorem — ustawisz go w <i>Ustawienia → System → Ekran</i>.<br><button class="m-btn small" id="vddRemove" style="margin-top:8px">Usuń sterownik</button>`;
+      if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
+      const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
+      on('vddInstall', () => vddRun(() => window.api.vddInstall()));
+      on('vddExtend', () => vddRun(() => window.api.vddExtend()));
+      on('vddRemove', () => { if (confirm('Usunąć sterownik wirtualnego monitora?')) vddRun(() => window.api.vddUninstall()); });
+    }
     function render(s) {
       const st = s.stream || {};
       $('via').textContent = st.via || 'brak telefonu';
@@ -98,9 +122,7 @@
       $('monField').hidden = !win;
       if (win) {
         $('mon').innerHTML = `<option value="">Automatycznie (wirtualny, inaczej główny)</option>` + (s.monitors || []).map((m) => `<option value="${esc(m.device)}" ${s.monitor === m.device ? 'selected' : ''}>${esc(`${m.adapter} — ${m.w}×${m.h}${m.primary ? ' (główny)' : ''}`)}</option>`).join('');
-        $('winHint').hidden = s.virtual;
-        $('winHint').innerHTML = 'Bez wirtualnego monitora telefon pokazuje kopię ekranu. Żeby był <b>dodatkowym</b> monitorem, zainstaluj darmowy <a class="m-link" href="#" id="vddLink">Virtual Display Driver</a> — Pitayas Screen sam ustawi mu rozdzielczość telefonu.';
-        const l = $('vddLink'); if (l) l.onclick = (e) => { e.preventDefault(); window.api.openUrl('https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/latest'); };
+        renderVdd(s);
       }
       const rows = [
         ...s.cable.iphone.map((d) => ({ ic: '', name: 'iPhone', sub: d.state === 'ok' ? 'Połączony' : 'Czeka na moduł Screen w aplikacji', on: d.state === 'ok' })),

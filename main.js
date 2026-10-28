@@ -20,6 +20,8 @@ const { createPortal } = WIN ? require('./win/portal') : require('./portal');
 const detectEncoders = WIN ? require('./win/capture').detectEncoders : require('./stream').detectEncoders;
 const tools = WIN ? require('./win/tools').createTools({ dataDir: core.paths.data, log: core.log, onStatus: (t) => { toolStatus = t; pushState(); } }) : null;
 let toolStatus = '', monitors = [], adbPath = WIN ? null : 'adb';
+let vdd = null;   // Windows: instalacja wirtualnego monitora (win/vdd.js)
+const vddState = { installed: false, monitor: false, busy: false, message: '' };
 const { createSession } = require('./session');
 const usbmux = require('./usbmux');
 
@@ -36,6 +38,7 @@ const state = () => ({
   platform: process.platform, tools: toolStatus,
   monitors, monitor: core.settings.get('monitor'),
   virtual: WIN ? monitors.some((m) => require('./win/portal').VIRTUAL.test(m.adapter)) : true,
+  vdd: vddState,
 });
 
 function pickEncoder() {
@@ -163,6 +166,9 @@ if (core.singleInstance(showWindow)) {
       const refresh = async () => { monitors = await portal.monitors(); pushState(); };
       refresh();
       setInterval(refresh, 5000);   // np. po zainstalowaniu wirtualnego monitora
+      vdd = require('./win/vdd').createVdd({ dataDir: core.paths.data, log: core.log, portal, onStatus: (t) => { vddState.message = t; pushState(); } });
+      refreshVdd();
+      setInterval(() => { if (!vddState.busy) refreshVdd(); }, 30000);
     }
     startServer();
     pollAdb();
@@ -179,6 +185,22 @@ ipcMain.on('pitaya:win-close', () => mainWindow && mainWindow.hide());
 ipcMain.on('app-quit', () => { isQuitting = true; app.quit(); });
 ipcMain.handle('screen:state', () => state());
 ipcMain.handle('screen:set-encoder', (e, id) => { core.settings.set('encoder', id); return state(); });
+// Wirtualny monitor (Windows): sterownik Virtual Display Driver — dzięki niemu telefon jest prawdziwym dodatkowym monitorem
+async function refreshVdd() {
+  if (!vdd) return;
+  try { Object.assign(vddState, await vdd.status()); } catch (err) { core.log.warn('VDD status:', err.message); }
+  pushState();
+}
+const vddAction = (fn) => async () => {
+  if (!vdd) return { ok: false, error: 'Dostępne tylko w Windows' };
+  vddState.busy = true; pushState();
+  try { await fn(); await refreshVdd(); return { ok: true }; }
+  catch (err) { core.log.error(err); return { ok: false, error: err.message }; }
+  finally { vddState.busy = false; vddState.message = ''; await refreshVdd(); }
+};
+ipcMain.handle('screen:vdd-install', vddAction(() => vdd.install()));
+ipcMain.handle('screen:vdd-uninstall', vddAction(() => vdd.uninstall()));
+ipcMain.handle('screen:vdd-extend', vddAction(() => vdd.extend()));
 ipcMain.handle('screen:set-monitor', (e, dev) => { core.settings.set('monitor', dev || ''); return state(); });
 ipcMain.handle('screen:open-url', (e, url) => { if (/^https:\/\//.test(url)) require('electron').shell.openExternal(url); });
 ipcMain.handle('screen:forget', () => { core.settings.set('restoreToken', ''); return true; });
