@@ -80,10 +80,14 @@ public static class PitayasHost {
             if ((dd.StateFlags & 1) == 0) { dd.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE)); continue; }   // tylko podłączone do pulpitu
             DEVMODE dm = new DEVMODE(); dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
             if (EnumDisplaySettings(dd.DeviceName, -1, ref dm)) {
+                // Sam monitor podłączony do tego wyjścia: nazwa i identyfikator (wirtualny monitor poznajemy po nich pewniej niż po nazwie karty)
+                DISPLAY_DEVICE md = new DISPLAY_DEVICE(); md.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+                string mname = "", mid = "";
+                if (EnumDisplayDevices(dd.DeviceName, 0, ref md, 0)) { mname = md.DeviceString; mid = md.DeviceID; }
                 if (!first) sb.Append(",");
                 first = false;
-                sb.AppendFormat("{{\"device\":\"{0}\",\"adapter\":\"{1}\",\"primary\":{2},\"x\":{3},\"y\":{4},\"w\":{5},\"h\":{6}}}",
-                    Esc(dd.DeviceName), Esc(dd.DeviceString), (dd.StateFlags & 4) != 0 ? "true" : "false", dm.dmPositionX, dm.dmPositionY, dm.dmPelsWidth, dm.dmPelsHeight);
+                sb.AppendFormat("{{\"device\":\"{0}\",\"adapter\":\"{1}\",\"monitor\":\"{7}\",\"monitorId\":\"{8}\",\"primary\":{2},\"x\":{3},\"y\":{4},\"w\":{5},\"h\":{6}}}",
+                    Esc(dd.DeviceName), Esc(dd.DeviceString), (dd.StateFlags & 4) != 0 ? "true" : "false", dm.dmPositionX, dm.dmPositionY, dm.dmPelsWidth, dm.dmPelsHeight, Esc(mname), Esc(mid));
             }
             dd.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
         }

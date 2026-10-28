@@ -4,9 +4,11 @@
 //  • jeśli nie — pokazujemy wybrany monitor (domyślnie główny) jako lustro.
 // Dotyk i klawiatura: SendInput przez stały proces PowerShell (win/host.ps1).
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
-const VIRTUAL = /virtual display|iddsample|mttvdd|parsec virtual|indirect display/i;
+// Wirtualny monitor poznajemy po karcie, nazwie monitora i jego identyfikatorze (MTT1337 = Virtual Display Driver)
+const VIRTUAL = /virtual display|iddsample|mttvdd|mtt1337|vdd by mtt|parsec virtual|indirect display|usbmmidd/i;
+const isVirtual = (m) => VIRTUAL.test(`${m.adapter || ''} ${m.monitor || ''} ${m.monitorId || ''}`);
 // Klawisze z telefonu (keysym X11, jak na Linuksie) → kody wirtualne Windows
 const VK = { 0xff0d: 0x0d, 0xff08: 0x08, 0xff09: 0x09, 0xff1b: 0x1b, 0xff51: 0x25, 0xff52: 0x26, 0xff53: 0x27, 0xff54: 0x28, 0xffff: 0x2e };
 
@@ -52,10 +54,12 @@ async function createPortal({ log, appDir, getMonitor }) {
     async function pick() {
         const list = await monitors();
         const want = getMonitor && getMonitor();
-        return list.find((m) => want && m.device === want) || list.find((m) => VIRTUAL.test(m.adapter)) || list.find((m) => m.primary) || list[0] || null;
+        return list.find((m) => want && m.device === want) || list.find((m) => isVirtual(m)) || list.find((m) => m.primary) || list[0] || null;
     }
 
     async function start() {
+        const all = await monitors();
+        log.info(`Monitory w systemie: ${all.map((m) => `${m.device} [${m.adapter} / ${m.monitor || '?'}] ${m.w}×${m.h} @ ${m.x},${m.y}${m.primary ? ' (główny)' : ''}`).join('; ') || 'brak'}`);
         mon = await pick();
         if (!mon) throw new Error('Nie widzę żadnego monitora');
         session = true;
@@ -83,7 +87,17 @@ async function createPortal({ log, appDir, getMonitor }) {
         target = [w, h];
         mon = (await pick()) || mon;   // wirtualny monitor mógł pojawić się po starcie aplikacji
         if (!mon) return [w, h];
-        if (VIRTUAL.test(mon.adapter)) {
+        // Windows potrafi trzymać nowy monitor w trybie „duplikuj” — wtedy telefon pokazywałby kopię głównego ekranu. Przełączamy na „rozszerz”.
+        if (isVirtual(mon)) {
+            const all = await monitors();
+            if (all.some((m) => m.device !== mon.device && m.x === mon.x && m.y === mon.y)) {
+                log.info('Wirtualny monitor jest zduplikowany z innym — przełączam Windows na „Rozszerz te ekrany”');
+                await new Promise((r) => execFile('DisplaySwitch.exe', ['/extend'], { windowsHide: true, timeout: 15000 }, () => r()));
+                await new Promise((r) => setTimeout(r, 2500));
+                mon = (await pick()) || mon;
+            }
+        }
+        if (isVirtual(mon)) {
             const best = pickMode(await getModes(mon.device), w, h);
             if (best && (best[0] !== mon.w || best[1] !== mon.h)) {
                 const r = await ask(`mode ${mon.device} ${best[0]} ${best[1]}`);
@@ -129,4 +143,4 @@ async function createPortal({ log, appDir, getMonitor }) {
     };
 }
 
-module.exports = { createPortal, VIRTUAL };
+module.exports = { createPortal, VIRTUAL, isVirtual };

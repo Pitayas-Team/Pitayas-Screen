@@ -116,7 +116,7 @@ Done 'OK' 0
         if (out !== 'OK') throw new Error(out || 'Instalacja nie powiodła się');
     }
 
-    const hasMonitor = async () => (await portal.monitors()).some((m) => /virtual display|iddsample|mttvdd|indirect display/i.test(m.adapter));
+    const hasMonitor = async () => (await portal.monitors()).some((m) => require('./portal').isVirtual(m));
     async function waitForMonitor(ms) {
         const end = Date.now() + ms;
         while (Date.now() < end) { if (await hasMonitor()) return true; await new Promise((r) => setTimeout(r, 1000)); }

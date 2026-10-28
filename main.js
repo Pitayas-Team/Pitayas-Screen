@@ -37,7 +37,7 @@ const state = () => ({
   cable, stream: session ? session.status() : {},
   platform: process.platform, tools: toolStatus,
   monitors, monitor: core.settings.get('monitor'),
-  virtual: WIN ? monitors.some((m) => require('./win/portal').VIRTUAL.test(m.adapter)) : true,
+  virtual: WIN ? monitors.some((m) => require('./win/portal').isVirtual(m)) : true,
   vdd: vddState,
 });
 
